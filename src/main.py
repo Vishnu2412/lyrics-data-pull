@@ -4,7 +4,7 @@ from services.lyrics_service import LyricsService
 
 def main():
     service = LyricsService()
-    output_file = 'punjabi_lyricsmint_complete_v2.json'
+    output_file = '../output/punjabi_lyricsmint_complete_v2.json'
     
     print("🎵 Starting complete Punjabi songs extraction from LyricsMint...")
     print("📊 Processing pages 1-300 with enhanced song info")

@@ -28,6 +28,9 @@ class LyricsService:
         return songs
     
     def save_data(self, filename='lyrics_data.json'):
+        # Ensure output goes to output folder
+        if not filename.startswith('../output/'):
+            filename = f'../output/{filename}'
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(self.all_songs, f, ensure_ascii=False, indent=2)
         print(f"Saved {len(self.all_songs)} songs to {filename}")
