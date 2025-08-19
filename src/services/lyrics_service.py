@@ -19,6 +19,14 @@ class LyricsService:
         self.all_songs.extend(songs)
         return songs
     
+    def scrape_website_batch(self, website_name, start_page, end_page):
+        if website_name not in self.adapters:
+            raise ValueError(f"Adapter for {website_name} not found")
+        
+        adapter = self.adapters[website_name]
+        songs = adapter.scrape_batch(start_page, end_page)
+        return songs
+    
     def save_data(self, filename='lyrics_data.json'):
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(self.all_songs, f, ensure_ascii=False, indent=2)
