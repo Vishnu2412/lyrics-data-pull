@@ -318,4 +318,4 @@ class LyricsMintAdapter(BaseAdapter):
             if source and source.get('src'):
                 return source['src']
         
-Make sure you configure your "user.name" and "user.email" in git.        return None
+        return None
