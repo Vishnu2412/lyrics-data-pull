@@ -121,6 +121,7 @@ class LyricsMintAdapter(BaseAdapter):
             language = self._extract_language(soup, full_lyrics)
             choreography = self._extract_choreography(soup)
             music_label = self._extract_music_label(soup)
+            video_url = self._extract_video_url(soup)
             
             if len(full_lyrics.strip()) > 100:
                 return {
@@ -135,6 +136,7 @@ class LyricsMintAdapter(BaseAdapter):
                     'language': language,
                     'choreography': choreography,
                     'music_label': music_label,
+                    'video_url': video_url,
                     'lyrics': full_lyrics.strip(),
                     'url': url,
                     'source': 'LyricsMint'
@@ -144,40 +146,86 @@ class LyricsMintAdapter(BaseAdapter):
             print(f"Error extracting {url}: {e}")
             return None
     
+    def _extract_from_h3_structure(self, soup):
+        """Extract structured data from h3 Song Info sections"""
+        data = {}
+        h3_elements = soup.find_all('h3')
+        
+        for h3 in h3_elements:
+            text = h3.get_text().strip()
+            if 'Song Info' in text:
+                next_elem = h3.find_next_sibling()
+                if next_elem:
+                    content = next_elem.get_text()
+                    for line in content.split('\n'):
+                        if ':' in line:
+                            key, value = line.split(':', 1)
+                            key = key.strip().lower()
+                            value = value.strip()
+                            if key == 'singer': data['artist'] = value
+                            elif key == 'lyricist': data['lyricist'] = value
+                            elif key == 'music': data['music'] = value
+                            elif key == 'director': data['director'] = value
+                            elif key == 'language': data['language'] = value
+                            elif key == 'choreography': data['choreography'] = value
+                            elif key == 'music label': data['music_label'] = value
+        return data
+    
+    def _extract_from_h3_questions(self, soup):
+        """Extract writer and cast from h3 question sections"""
+        data = {}
+        h3_elements = soup.find_all('h3')
+        
+        for h3 in h3_elements:
+            text = h3.get_text().strip()
+            if 'written' in text.lower():
+                match = re.search(r'written.*?by\s+([A-Za-z\s,&]+)', text, re.IGNORECASE)
+                if match: data['writer'] = match.group(1).strip()
+            elif 'features' in text.lower() or 'cast' in text.lower():
+                match = re.search(r'features\s+([A-Za-z\s,&]+)', text, re.IGNORECASE)
+                if match: data['cast'] = match.group(1).strip()
+        return data
+    
     def _extract_artist(self, soup, title):
-        # Try to extract artist from title or content
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('artist'): return h3_data['artist']
+        
+        # Fallback to title parsing
         if 'Lyrics' in title:
             parts = title.replace('Lyrics', '').strip().split()
-            if len(parts) > 1:
-                return ' '.join(parts[1:]).strip()
-        
-        # Look for artist info in text
-        text = soup.get_text()
-        artist_match = re.search(r'has sung the song ".*?".*?([A-Za-z\s]+) is known for singing', text)
-        if artist_match:
-            return artist_match.group(1).strip()
+            if len(parts) > 1: return ' '.join(parts[1:]).strip()
         return None
     
     def _extract_writer(self, soup):
+        # Try h3 questions first
+        h3_data = self._extract_from_h3_questions(soup)
+        if h3_data.get('writer'): return h3_data['writer']
+        
+        # Fallback to regex
         text = soup.get_text()
-        writer_match = re.search(r'Written by:\s*([A-Za-z\s,&]+)', text)
-        if writer_match:
-            return writer_match.group(1).strip()
-        return None
+        match = re.search(r'Written by:\s*([A-Za-z\s,&]+)', text)
+        return match.group(1).strip() if match else None
     
     def _extract_director(self, soup):
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('director'): return h3_data['director']
+        
+        # Fallback to regex
         text = soup.get_text()
-        director_match = re.search(r'([A-Za-z\s]+) has directed the music video', text)
-        if director_match:
-            return director_match.group(1).strip()
-        return None
+        match = re.search(r'([A-Za-z\s]+) has directed the music video', text)
+        return match.group(1).strip() if match else None
     
     def _extract_cast(self, soup):
+        # Try h3 questions first
+        h3_data = self._extract_from_h3_questions(soup)
+        if h3_data.get('cast'): return h3_data['cast']
+        
+        # Fallback to regex
         text = soup.get_text()
-        cast_match = re.search(r'music video.*?features ([A-Za-z\s,&]+)', text)
-        if cast_match:
-            return cast_match.group(1).strip()
-        return None
+        match = re.search(r'music video.*?features ([A-Za-z\s,&]+)', text)
+        return match.group(1).strip() if match else None
     
     def _extract_album(self, soup):
         text = soup.get_text()
@@ -194,73 +242,80 @@ class LyricsMintAdapter(BaseAdapter):
         return None
     
     def _extract_lyricist(self, soup):
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('lyricist'): return h3_data['lyricist']
+        
+        # Fallback to regex patterns
         text = soup.get_text()
-        # Look for lyricist info (often same as writer but can be different)
-        lyricist_patterns = [
-            r'lyrics by[\s:]+([A-Za-z\s,&]+)',
-            r'lyricist[\s:]+([A-Za-z\s,&]+)',
-            r'Lyrics[\s:]+([A-Za-z\s,&]+)'
-        ]
-        for pattern in lyricist_patterns:
+        patterns = [r'lyrics by[\s:]+([A-Za-z\s,&]+)', r'lyricist[\s:]+([A-Za-z\s,&]+)']
+        for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-        # Fallback to writer if no specific lyricist found
+            if match: return match.group(1).strip()
         return self._extract_writer(soup)
     
     def _extract_music(self, soup):
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('music'): return h3_data['music']
+        
+        # Fallback to regex patterns
         text = soup.get_text()
-        # Look for music composer/director
-        music_patterns = [
-            r'music by[\s:]+([A-Za-z\s,&]+)',
-            r'music director[\s:]+([A-Za-z\s,&]+)',
-            r'composed by[\s:]+([A-Za-z\s,&]+)',
-            r'Music[\s:]+([A-Za-z\s,&]+)'
-        ]
-        for pattern in music_patterns:
+        patterns = [r'music by[\s:]+([A-Za-z\s,&]+)', r'composed by[\s:]+([A-Za-z\s,&]+)']
+        for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
+            if match: return match.group(1).strip()
         return None
     
     def _extract_language(self, soup, lyrics):
-        # Detect language based on script and common words
-        if any(char in lyrics for char in 'ਪੰਜਾਬੀ'):
-            return 'Punjabi (Gurmukhi)'
-        elif any(char in lyrics for char in 'हिंदी'):
-            return 'Hindi/Punjabi (Devanagari)'
-        elif re.search(r'[ਅ-ੌ]', lyrics):
-            return 'Punjabi (Gurmukhi)'
-        elif re.search(r'[अ-ौ]', lyrics):
-            return 'Hindi/Punjabi (Devanagari)'
-        else:
-            return 'Punjabi (Roman)'
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('language'): return h3_data['language']
+        
+        # Fallback to script detection
+        if re.search(r'[ਅ-ੌ]', lyrics): return 'Punjabi (Gurmukhi)'
+        elif re.search(r'[अ-ौ]', lyrics): return 'Hindi/Punjabi (Devanagari)'
+        else: return 'Punjabi (Roman)'
     
     def _extract_choreography(self, soup):
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('choreography'): return h3_data['choreography']
+        
+        # Fallback to regex
         text = soup.get_text()
-        # Look for choreographer info
-        choreo_patterns = [
-            r'choreograph[a-z]*[\s:]+([A-Za-z\s,&]+)',
-            r'dance director[\s:]+([A-Za-z\s,&]+)',
-            r'Choreograph[a-z]*[\s:]+([A-Za-z\s,&]+)'
-        ]
-        for pattern in choreo_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-        return None
+        match = re.search(r'choreograph[a-z]*[\s:]+([A-Za-z\s,&]+)', text, re.IGNORECASE)
+        return match.group(1).strip() if match else None
     
     def _extract_music_label(self, soup):
+        # Try h3 structure first
+        h3_data = self._extract_from_h3_structure(soup)
+        if h3_data.get('music_label'): return h3_data['music_label']
+        
+        # Fallback to regex
         text = soup.get_text()
-        # Look for music label/production house
-        label_patterns = [
-            r'label[\s:]+([A-Za-z\s0-9&]+)',
-            r'production[\s:]+([A-Za-z\s0-9&]+)',
-            r'presented by[\s:]+([A-Za-z\s0-9&]+)',
-            r'Label[\s:]+([A-Za-z\s0-9&]+)'
-        ]
-        for pattern in label_patterns:
+        patterns = [r'label[\s:]+([A-Za-z\s0-9&]+)', r'presented by[\s:]+([A-Za-z\s0-9&]+)']
+        for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
+            if match: return match.group(1).strip()
         return None
+    
+    def _extract_video_url(self, soup):
+        """Extract video URL from embedded players"""
+        # YouTube iframe
+        youtube_iframe = soup.find('iframe', src=re.compile(r'youtube\.com|youtu\.be'))
+        if youtube_iframe:
+            return youtube_iframe['src']
+        
+        # Video tags
+        video_tag = soup.find('video')
+        if video_tag and video_tag.get('src'):
+            return video_tag['src']
+        
+        # Source tags within video
+        if video_tag:
+            source = video_tag.find('source')
+            if source and source.get('src'):
+                return source['src']
+        
+Make sure you configure your "user.name" and "user.email" in git.        return None
